@@ -1,4 +1,6 @@
-Streamlit
 Matplotlib
-scikit-learn
 openpyxl
+streamlit==1.25.0
+scikit-learn==1.2.2
+pandas
+
