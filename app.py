@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import pickle
 import matplotlib.pyplot as plt
-import sklearn
+from sklearn.exceptions import NotFittedError
 
 # Load pre-trained models
 cnc_models = {
@@ -32,26 +32,26 @@ THRESHOLDS = {
 
 # Apply custom CSS for button styling
 st.markdown(
-    f"""
+    """
     <style>
-    .stApp {{
+    .stApp {
         background-color: #E9F1FA;
         font-family: 'Roboto', sans-serif;
-    }}
-    .stTitle {{
+    }
+    .stTitle {
         font-size: 40px;
         color: #00ABE4;
         font-family: 'Montserrat', sans-serif;
         text-align: center;
-    }}
-    .stHeader {{
+    }
+    .stHeader {
         font-size: 24px;
         color: #00ABE4;
         font-family: 'Roboto', sans-serif;
         text-align: center;
         margin-bottom: 20px;
-    }}
-    .stButton > button {{
+    }
+    .stButton > button {
         width: 100%;
         height: 60px;
         font-size: 16px;
@@ -60,10 +60,10 @@ st.markdown(
         color: white;
         border-radius: 10px;
         margin: 10px;
-    }}
-    .stButton > button:hover {{
+    }
+    .stButton > button:hover {
         background-color: #008FC4;
-    }}
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -145,23 +145,13 @@ def cnc_machine_page(machine):
     predict_maintenance_form(machine)
 
 def plot_graph_with_threshold(data, y_col, x_col):
-    # Update the graph title to green
     st.markdown(
-        f"""
-        <div style="color: green; font-size: 24px; font-weight: bold; text-align: center;">
-            {y_col} vs {x_col}
-        </div>
-        """,
+        f"<div style='color: green; font-size: 24px; font-weight: bold; text-align: center;'>{y_col} vs {x_col}</div>",
         unsafe_allow_html=True,
     )
     fig, ax = plt.subplots()
     ax.plot(data[x_col], data[y_col], label=y_col, color="green")
-    ax.axhline(
-        y=THRESHOLDS[y_col],
-        color="red",
-        linestyle="--",
-        label=f"Threshold ({THRESHOLDS[y_col]} °C)",
-    )
+    ax.axhline(y=THRESHOLDS[y_col], color="red", linestyle="--", label=f"Threshold ({THRESHOLDS[y_col]} °C)")
     ax.set_xlabel(x_col, fontsize=12, fontweight="bold")
     ax.set_ylabel(y_col, fontsize=12, fontweight="bold")
     ax.legend()
@@ -177,99 +167,36 @@ def predict_maintenance_form(machine):
         st.session_state["prediction_result"] = ""
 
     with st.form("input_form"):
-        # Define input fields
         inputs = {}
+        feature_names = cnc_models[machine].feature_names_in_
+        cols = st.columns(3)
 
-        # Define the feature names and divide them into rows
-        feature_names = [
-            "Control Panel Temperature (\u00b0C)",
-            "Spindle Motor Temperature (\u00b0C)",
-            "Servo Motor Temperature (\u00b0C)",
-            "Coolant Temperature (\u00b0C)",
-            "Coolant Flow (L/min)",
-            "Coolant Level (%)",
-            "Tool Wear (%)",
-            "Tool Breakage (Yes/No)",
-            "Spindle Speed (RPM)",
-            "Feed Rate (mm/min)",
-            "Vibration (mm/s)",
-            "Fan Speed (RPM)",
-            "Power Consumption (kW)",
-            "Cycle Time (mins)",
-            "Idle Time (mins)",
-            "Axis Load (X, Y, Z)",
-            "Ambient Temperature (\u00b0C)",
-            "Hydraulic Pressure (bar)",
-            "Status (Running/Stopped)",
-        ]
-
-        # Arrange inputs in a grid format
-        cols = st.columns(3)  # 3 columns for grid layout
         for i, feature in enumerate(feature_names):
-            col = cols[i % 3]  # Distribute inputs across columns
-            if feature in ["Tool Breakage (Yes/No)", "Status (Running/Stopped)"]:
-                options = ["No", "Yes"] if "Tool Breakage" in feature else ["Stopped", "Running"]
-                inputs[feature] = col.selectbox(feature, options, index=0)
-            else:
-                inputs[feature] = col.text_input(feature, value="")  # Blank numerical inputs
+            col = cols[i % 3]
+            inputs[feature] = col.text_input(feature, value="")
 
-        # Add a submit button
-        submit_button = st.form_submit_button("Enter to submit")
-
+        submit_button = st.form_submit_button("Submit")
         if submit_button:
-            # Check if all fields are filled
-            if all(value != "" for value in inputs.values()):
-                # Prepare input DataFrame
-                input_df = pd.DataFrame([{
-                    k: (1 if v.lower() == "yes" or v.lower() == "running" else 0) if isinstance(v, str) else float(v)
-                    for k, v in inputs.items()
-                }])
-
-                # Align input DataFrame with model's expected features
+            if all(value.strip() for value in inputs.values()):
+                input_df = pd.DataFrame([inputs])
                 model = cnc_models[machine]
-                expected_features = model.feature_names_in_
-
-                # Add missing columns with default values (0)
-                for feature in expected_features:
-                    if feature not in input_df.columns:
-                        input_df[feature] = 0
-
-                # Reorder columns to match the model
-                input_df = input_df[expected_features]
-
-                # Make the prediction
-                prediction = model.predict(input_df)[0]
-
-                # Update session state with the prediction result
-                st.session_state["prediction_result"] = f"{machine} Requires Maintenance" if prediction == 1 else f"{machine} Requires no Maintenance"
+                try:
+                    prediction = model.predict(input_df)[0]
+                    st.session_state["prediction_result"] = f"{machine} {'Requires Maintenance' if prediction == 1 else 'Does not Require Maintenance'}"
+                except NotFittedError:
+                    st.error("Model is not properly loaded or fitted.")
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
             else:
-                st.error("All inputs are mandatory. Please fill in all fields.")
+                st.error("Please fill in all fields.")
 
-    # Display the prediction result below the form
     if st.session_state["prediction_result"]:
-        is_maintenance_required = "Requires Maintenance" in st.session_state["prediction_result"]
-        result_color = "#FF3131" if is_maintenance_required else "#50C878"
-
+        color = "#FF3131" if "Requires Maintenance" in st.session_state["prediction_result"] else "#50C878"
         st.markdown(
-            f"""
-            <div style="background-color: {result_color}; 
-                        color: white; 
-                        border-radius: 10px; 
-                        padding: 15px; 
-                        text-align: center; 
-                        font-size: 18px; 
-                        font-family: 'Roboto', sans-serif;
-                        font-weight: bold;">
-                {st.session_state['prediction_result']}
-            </div>
-            """,
-            unsafe_allow_html=True
+            f"<div style='background-color: {color}; color: white; padding: 15px; border-radius: 5px; text-align: center;'>{st.session_state['prediction_result']}</div>",
+            unsafe_allow_html=True,
         )
-
-
 
 
 if __name__ == "__main__":
     main()
-
-               
